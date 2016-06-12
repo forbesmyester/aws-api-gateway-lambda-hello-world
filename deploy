@@ -1,0 +1,9 @@
+#!/bin/bash
+cd add
+zip -9 add.zip index.js
+mv add.zip ../
+cd ..
+# terraform taint -var aws_profile=$DEFAULT_AWS_PROFILE aws_cloudwatch_event_target.fire_every_minute
+# terraform taint -var aws_profile=$DEFAULT_AWS_PROFILE aws_lambda_function.fire_every_minute 
+# terraform destroy -force -var aws_profile=$DEFAULT_AWS_PROFILE
+terraform apply -var aws_profile=$DEFAULT_AWS_PROFILE

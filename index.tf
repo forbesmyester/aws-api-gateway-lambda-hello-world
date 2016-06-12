@@ -28,7 +28,7 @@ resource "aws_iam_role_policy" "plus" {
 # I was hoping that using a bucket / object method instead of
 # aws_lambda_function.filename might make Terraform pick up changes in code
 # better but it seems I still need to taint them before running.
-resource "aws_lambda_function" "plus" {
+resource "aws_lambda_function" "role_put" {
     filename = "code.zip"
     function_name = "plus"
     handler = "index.handler"
@@ -44,7 +44,7 @@ resource "aws_lambda_function" "plus" {
 resource "aws_lambda_permission" "plus" {
     statement_id = "plusperm"
     action = "lambda:InvokeFunction"
-    function_name = "${aws_lambda_function.plus.arn}"
+    function_name = "${aws_lambda_function.role_put.arn}"
     principal = "apigateway.amazonaws.com"
 }
 
@@ -55,45 +55,74 @@ resource "aws_api_gateway_rest_api" "plus" {
 
 # == API Gateway: Path
 # Specify the resource location and tell it that it is to call the Lambda
-resource "aws_api_gateway_resource" "plus1" {
+resource "aws_api_gateway_resource" "app" {
     rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
     parent_id = "${aws_api_gateway_rest_api.plus.root_resource_id}"
-    path_part = "my"
+    path_part = "app"
 }
-resource "aws_api_gateway_resource" "plus2" {
+resource "aws_api_gateway_resource" "app_id" {
     rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
-    parent_id = "${aws_api_gateway_resource.plus1.id}"
-    path_part = "path"
+    parent_id = "${aws_api_gateway_resource.app.id}"
+    path_part = "{app_id}"
 }
-resource "aws_api_gateway_method" "plus" {
+resource "aws_api_gateway_resource" "role" {
     rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
-    resource_id = "${aws_api_gateway_resource.plus2.id}"
-    http_method = "GET"
+    parent_id = "${aws_api_gateway_resource.app_id.id}"
+    path_part = "role"
+}
+resource "aws_api_gateway_resource" "role_id" {
+    rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
+    parent_id = "${aws_api_gateway_resource.role.id}"
+    path_part = "{role_id}"
+}
+resource "aws_api_gateway_method" "role_put" {
+    rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
+    resource_id = "${aws_api_gateway_resource.role_id.id}"
+    http_method = "PUT"
     authorization = "NONE"
+    # request_models = {
+    #     "application/json" = "${aws_api_gateway_model.role.name}"
+    # }
 }
-resource "aws_api_gateway_integration" "plus" {
+resource "aws_api_gateway_integration" "role_put" {
     rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
-    resource_id = "${aws_api_gateway_resource.plus2.id}"
-    http_method = "${aws_api_gateway_method.plus.http_method}"
+    resource_id = "${aws_api_gateway_resource.role_id.id}"
+    http_method = "${aws_api_gateway_method.role_put.http_method}"
     type = "AWS"
-    uri = "arn:aws:apigateway:${var.region}:lambda:path/2015-03-31/functions/${aws_lambda_function.plus.arn}/invocations"
+    uri = "arn:aws:apigateway:${var.region}:lambda:path/2015-03-31/functions/${aws_lambda_function.role_put.arn}/invocations"
     integration_http_method = "POST"
+    depends_on = ["aws_lambda_function.role_put"]
+    request_templates = {
+        "application/json" = "${file("./body_mapping_template/method_request_passthrough")}"
+    }
+}
+
+# == API Gateway: Models
+# If you attach a model, it seems to replace the whole of the event in the
+# Lambda with just that model, which is not helpful if you need to get access
+# to the path variables. Therefore right now this is just for documentation and
+# perhaps use in the code...
+resource "aws_api_gateway_model" "role" {
+    rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
+    name = "role"
+    schema = "${file("./json-schema/role.model.json")}"
+    content_type = "application/json"
 }
 
 # == API Gateway: Response
 # Map back the Lambda function result into HTTP
 resource "aws_api_gateway_method_response" "200" {
     rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
-    resource_id = "${aws_api_gateway_resource.plus2.id}"
-    http_method = "${aws_api_gateway_method.plus.http_method}"
+    resource_id = "${aws_api_gateway_resource.role_id.id}"
+    http_method = "${aws_api_gateway_method.role_put.http_method}"
     status_code = "200"
 }
 resource "aws_api_gateway_integration_response" "plus" {
     rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
-    resource_id = "${aws_api_gateway_resource.plus2.id}"
-    http_method = "${aws_api_gateway_method.plus.http_method}"
+    resource_id = "${aws_api_gateway_resource.role_id.id}"
+    http_method = "${aws_api_gateway_method.role_put.http_method}"
     status_code = "${aws_api_gateway_method_response.200.status_code}"
-    depends_on = ["aws_api_gateway_integration.plus"]
+    depends_on = ["aws_api_gateway_integration.role_put"]
 }
 
 # == API Gateway: Deployment
@@ -103,6 +132,6 @@ resource "aws_api_gateway_integration_response" "plus" {
 resource "aws_api_gateway_deployment" "plus" {
     rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
     stage_name = "api"
-    depends_on = ["aws_api_gateway_integration.plus"]
+    depends_on = ["aws_api_gateway_integration.role_put"]
 }
 

@@ -28,7 +28,7 @@ resource "aws_iam_role_policy" "plus" {
 # I was hoping that using a bucket / object method instead of
 # aws_lambda_function.filename might make Terraform pick up changes in code
 # better but it seems I still need to taint them before running.
-resource "aws_lambda_function" "role_put" {
+resource "aws_lambda_function" "role_put" { # TODO: Module
     filename = "code.zip"
     function_name = "plus"
     handler = "index.handler"
@@ -75,27 +75,6 @@ resource "aws_api_gateway_resource" "role_id" {
     parent_id = "${aws_api_gateway_resource.role.id}"
     path_part = "{role_id}"
 }
-resource "aws_api_gateway_method" "role_put" {
-    rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
-    resource_id = "${aws_api_gateway_resource.role_id.id}"
-    http_method = "PUT"
-    authorization = "NONE"
-    # request_models = {
-    #     "application/json" = "${aws_api_gateway_model.role.name}"
-    # }
-}
-resource "aws_api_gateway_integration" "role_put" {
-    rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
-    resource_id = "${aws_api_gateway_resource.role_id.id}"
-    http_method = "${aws_api_gateway_method.role_put.http_method}"
-    type = "AWS"
-    uri = "arn:aws:apigateway:${var.region}:lambda:path/2015-03-31/functions/${aws_lambda_function.role_put.arn}/invocations"
-    integration_http_method = "POST"
-    depends_on = ["aws_lambda_function.role_put"]
-    request_templates = {
-        "application/json" = "${file("./body_mapping_template/method_request_passthrough")}"
-    }
-}
 
 # == API Gateway: Models
 # If you attach a model, it seems to replace the whole of the event in the
@@ -111,19 +90,6 @@ resource "aws_api_gateway_model" "role" {
 
 # == API Gateway: Response
 # Map back the Lambda function result into HTTP
-resource "aws_api_gateway_method_response" "200" {
-    rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
-    resource_id = "${aws_api_gateway_resource.role_id.id}"
-    http_method = "${aws_api_gateway_method.role_put.http_method}"
-    status_code = "200"
-}
-resource "aws_api_gateway_integration_response" "plus" {
-    rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
-    resource_id = "${aws_api_gateway_resource.role_id.id}"
-    http_method = "${aws_api_gateway_method.role_put.http_method}"
-    status_code = "${aws_api_gateway_method_response.200.status_code}"
-    depends_on = ["aws_api_gateway_integration.role_put"]
-}
 
 # == API Gateway: Deployment
 # This add a stage in the UI, which actually adds the public methods. Note:
@@ -132,6 +98,39 @@ resource "aws_api_gateway_integration_response" "plus" {
 resource "aws_api_gateway_deployment" "plus" {
     rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
     stage_name = "api"
-    depends_on = ["aws_api_gateway_integration.role_put"]
+    # depends_on = ["aws_api_gateway_integration.role_put"]
+}
+
+module "lambda_api_gateway" {
+    source = "./lambda_api_gateway"
+    aws_lambda_function = "${aws_lambda_function.role_put.arn}"
+    region = "${var.region}"
+
+    aws_api_gateway_rest_api = "${aws_api_gateway_rest_api.plus.id}"
+    aws_api_gateway_resource = "${aws_api_gateway_resource.role_id.id}"
+    aws_api_gateway_method = "${aws_api_gateway_method.role_put.http_method}"
+}
+
+resource "aws_api_gateway_method" "role_put" { # TODO: Module
+    rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
+    resource_id = "${aws_api_gateway_resource.role_id.id}"
+    http_method = "PUT"
+    authorization = "NONE"
+    # request_models = {
+    #     "application/json" = "${aws_api_gateway_model.role.name}"
+    # }
+}
+resource "aws_api_gateway_method_response" "200" { # TODO: Module
+    rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
+    resource_id = "${aws_api_gateway_resource.role_id.id}"
+    http_method = "${aws_api_gateway_method.role_put.http_method}"
+    status_code = "200"
+}
+resource "aws_api_gateway_integration_response" "plus" { # TODO: Module
+    rest_api_id = "${aws_api_gateway_rest_api.plus.id}"
+    resource_id = "${aws_api_gateway_resource.role_id.id}"
+    http_method = "${aws_api_gateway_method.role_put.http_method}"
+    status_code = "${aws_api_gateway_method_response.200.status_code}"
+    # depends_on = ["aws_api_gateway_integration.role_put"]
 }
 
